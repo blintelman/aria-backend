@@ -51,7 +51,9 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const { messages } = req.body;
+    // Support both application/json (auto-parsed) and text/plain (no-preflight CORS workaround)
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const { messages } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "messages array required" });
