@@ -44,6 +44,47 @@ Rules for the tag:
 - Do not include it in any other message
 - The tag must be valid JSON`;
 
+// ─── HubSpot contact creation ─────────────────────────────────────────────────
+async function createHubSpotContact(leadData) {
+  try {
+    const [firstName, ...rest] = (leadData.name || "").trim().split(" ");
+    const lastName = rest.join(" ");
+
+    const properties = {
+      email: leadData.email || "",
+      firstname: firstName || "",
+      lastname: lastName || "",
+      company: leadData.company || "",
+      phone: leadData.phone || "",
+      hs_lead_status: "NEW",
+      lead_source: "Website - Aria Chat",
+    };
+
+    const hsRes = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.HUBSPOT_TOKEN}`,
+      },
+      body: JSON.stringify({ properties }),
+    });
+
+    if (hsRes.status === 409) {
+      console.log("HubSpot: contact already exists for", leadData.email);
+      return;
+    }
+    if (!hsRes.ok) {
+      const err = await hsRes.text();
+      console.error("HubSpot API error:", hsRes.status, err);
+    } else {
+      const data = await hsRes.json();
+      console.log("HubSpot contact created:", data.id, leadData.email);
+    }
+  } catch (err) {
+    console.error("HubSpot contact creation failed:", err);
+  }
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   setCors(res);
@@ -51,7 +92,6 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    // Support both application/json (auto-parsed) and text/plain (no-preflight CORS workaround)
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     const { messages } = body;
 
@@ -70,18 +110,17 @@ module.exports = async (req, res) => {
 
     const fullText = completion.content[0].text;
 
-    // Extract lead capture data if present
     let leadData = null;
     const leadMatch = fullText.match(/\[LEAD_CAPTURED:([\s\S]*?)\]/);
     if (leadMatch) {
       try {
         leadData = JSON.parse(leadMatch[1]);
+        createHubSpotContact(leadData).catch(e => console.error("HubSpot async error:", e));
       } catch (e) {
         console.error("Failed to parse lead data:", leadMatch[1]);
       }
     }
 
-    // Strip the tag from the visible response
     const response = fullText.replace(/\[LEAD_CAPTURED:[\s\S]*?\]/, "").trim();
 
     return res.json({ response, leadData });
